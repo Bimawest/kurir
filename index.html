@@ -29,6 +29,7 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <script>
+        // KREDENSIAL LENGKAP BIMA
         const firebaseConfig = {
             apiKey: "AIzaSyCSwZqJAUvacT-oMJCtgp9tfCfCqxOM9CU",
             authDomain: "jastiptrackingbima.firebaseapp.com",
@@ -41,7 +42,7 @@
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
 
-        // Mencegah duplikat kurir saat refresh
+        // Mencegah duplikat kurir (localStorage)
         let kurirId = localStorage.getItem('kurir_id_bima');
         if (!kurirId) {
             kurirId = "kurir_" + Math.floor(Math.random() * 9999);
@@ -64,11 +65,17 @@
                     const lat = pos.coords.latitude, lng = pos.coords.longitude;
                     markerKurir.setLatLng([lat, lng]);
                     
-                    // Update database
-                    db.ref('kurir_online/' + kurirId).set({ lat, lng });
+                    // --- LOGIKA PENGHAPUSAN OTOMATIS (Presence) ---
+                    const onlineRef = db.ref('kurir_online/' + kurirId);
+                    
+                    // 1. Simpan koordinat saat online
+                    onlineRef.set({ lat, lng });
+                    
+                    // 2. Perintah ke server: "Jika saya mati/tutup web, hapus data saya!"
+                    onlineRef.onDisconnect().remove(); 
+                    
                     document.getElementById('statusGPS').innerHTML = "Status: <b>Online & Standby</b>";
                     
-                    // Fokus ke lokasi asli Anda saat pertama kali load
                     if (!firstLock) {
                         map.setView([lat, lng], 17);
                         firstLock = true;
@@ -76,11 +83,12 @@
                 }, null, { enableHighAccuracy: true });
             }
 
-            // Hapus ikon saat tab ditutup
+            // Fallback tambahan untuk penutupan tab secara normal
             window.addEventListener('beforeunload', () => {
                 db.ref('kurir_online/' + kurirId).remove();
             });
 
+            // Mendengarkan pesanan masuk
             db.ref('pesanan/aktif').on('value', snap => {
                 const order = snap.val();
                 if(order && order.status === 'mencari') {
