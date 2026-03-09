@@ -16,7 +16,7 @@
 <body>
     <div id="map"></div>
     <div class="panel">
-        <div id="dialogBox"><b>Status:</b> Menunggu Pesanan...</div>
+        <div id="dialogBox"><b>Status:</b> Mencari lokasi GPS...</div>
         <button id="btnKonfirmasi" onclick="konfirmasiAntar()">Konfirmasi Antar Sekarang</button>
     </div>
 
@@ -38,11 +38,12 @@
         const db = firebase.database();
 
         let map, markerKurir, markerUser;
+        let firstZoom = true; // Penanda untuk zoom pertama kali
         const blueIcon = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png', iconSize: [25, 41], iconAnchor: [12, 41] });
         const greenIcon = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png', iconSize: [25, 41], iconAnchor: [12, 41] });
 
         function initMap() {
-            map = L.map('map').setView([-6.2000, 106.8166], 13);
+            map = L.map('map').setView([0, 0], 2);
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
             markerKurir = L.marker([0,0], {icon: blueIcon}).addTo(map);
             markerUser = L.marker([0,0], {icon: greenIcon}).addTo(map);
@@ -50,21 +51,18 @@
             db.ref('tracking/transaksi_1').on('value', snap => {
                 const data = snap.val();
                 if (!data) {
-                    document.getElementById('dialogBox').innerHTML = "<b>Status:</b> Siap menerima pesanan baru.";
+                    document.getElementById('dialogBox').innerHTML = "<b>Status:</b> Online & Standby.";
                     document.getElementById('btnKonfirmasi').style.display = "none";
                     return;
                 }
-
                 if (data.status === 'dipilih') {
-                    document.getElementById('dialogBox').innerHTML = "<b>User memilih Anda!</b> Silakan konfirmasi pengantaran.";
+                    document.getElementById('dialogBox').innerHTML = "<b>User memilih Anda!</b> Konfirmasi sekarang.";
                     document.getElementById('btnKonfirmasi').style.display = "block";
                 }
-
                 if (data.pesan) document.getElementById('dialogBox').innerHTML = `<b>Dialog:</b> ${data.pesan.teks}`;
-                
                 if (data.user) {
                     markerUser.setLatLng([data.user.lat, data.user.lng]);
-                    // Auto zoom
+                    // Jika pesanan aktif, zoom ke keduanya
                     const group = new L.featureGroup([markerKurir, markerUser]);
                     if(markerKurir.getLatLng().lat !== 0) map.fitBounds(group.getBounds().pad(0.3));
                 }
@@ -75,8 +73,15 @@
                     const lat = pos.coords.latitude; const lng = pos.coords.longitude;
                     markerKurir.setLatLng([lat, lng]);
                     db.ref('tracking/transaksi_1/kurir').set({ lat, lng });
+                    
+                    // Zoom ke icon kurir saat pertama kali standby
+                    if (firstZoom) {
+                        map.setView([lat, lng], 16);
+                        firstZoom = false;
+                        document.getElementById('dialogBox').innerHTML = "<b>Status:</b> Lokasi kurir aktif.";
+                    }
                 }, err => {
-                    alert("Gagal akses lokasi! Pastikan GPS HP aktif dan gunakan HTTPS GitHub.");
+                    alert("GPS Error! Gunakan HTTPS GitHub Pages.");
                 }, { enableHighAccuracy: true });
             }
         }
