@@ -3,28 +3,28 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Jastip - Panel Kurir</title>
+    <title>Panel Kurir - Kurir (Biru)</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        body { font-family: sans-serif; text-align: center; padding: 20px; background: #f0f2f5; }
-        .card { background: white; padding: 30px; border-radius: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 400px; margin: auto; }
-        button { background: #0084ff; color: white; border: none; padding: 15px 25px; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold; }
-        #status { margin-top: 20px; color: #555; }
+        body { margin: 0; font-family: sans-serif; background: #f4f4f4; }
+        #map { width: 100%; height: 60vh; }
+        .panel { padding: 20px; text-align: center; background: white; border-radius: 25px 25px 0 0; margin-top: -25px; position: relative; z-index: 1000; box-shadow: 0 -5px 15px rgba(0,0,0,0.1); }
+        #btnKonfirmasi { display: none; background: #28a745; color: white; border: none; padding: 15px; border-radius: 10px; width: 100%; font-weight: bold; cursor: pointer; font-size: 16px; }
+        #dialogBox { background: #f8f9fa; padding: 12px; margin-bottom: 12px; border-radius: 10px; font-size: 14px; border-left: 5px solid #28a745; }
     </style>
 </head>
 <body>
-
-    <div class="card">
-        <h2>Panel Kurir Jastip</h2>
-        <p>Tekan tombol untuk mulai membagikan lokasi Anda secara live.</p>
-        <button onclick="aktifkanGPS()">Mulai Antar Barang</button>
-        <p id="status">Status: <b>Offline</b></p>
+    <div id="map"></div>
+    <div class="panel">
+        <div id="dialogBox"><b>Status:</b> Menunggu Pesanan...</div>
+        <button id="btnKonfirmasi" onclick="konfirmasiAntar()">Konfirmasi Antar Sekarang</button>
     </div>
 
     <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-database-compat.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <script>
-        // Konfigurasi Firebase Anda
         const firebaseConfig = {
             apiKey: "AIzaSyCSwZqJAUvacT-oMJCtgp9tfCfCqxOM9CU",
             authDomain: "jastiptrackingbima.firebaseapp.com",
@@ -34,34 +34,61 @@
             messagingSenderId: "187742172528",
             appId: "1:187742172528:web:0556ec9c738476faff0bb5"
         };
-        
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
 
-        function aktifkanGPS() {
+        let map, markerKurir, markerUser;
+        const blueIcon = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png', iconSize: [25, 41], iconAnchor: [12, 41] });
+        const greenIcon = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png', iconSize: [25, 41], iconAnchor: [12, 41] });
+
+        function initMap() {
+            map = L.map('map').setView([-6.2000, 106.8166], 13);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+            markerKurir = L.marker([0,0], {icon: blueIcon}).addTo(map);
+            markerUser = L.marker([0,0], {icon: greenIcon}).addTo(map);
+
+            db.ref('tracking/transaksi_1').on('value', snap => {
+                const data = snap.val();
+                if (!data) {
+                    document.getElementById('dialogBox').innerHTML = "<b>Status:</b> Siap menerima pesanan baru.";
+                    document.getElementById('btnKonfirmasi').style.display = "none";
+                    return;
+                }
+
+                if (data.status === 'dipilih') {
+                    document.getElementById('dialogBox').innerHTML = "<b>User memilih Anda!</b> Silakan konfirmasi pengantaran.";
+                    document.getElementById('btnKonfirmasi').style.display = "block";
+                }
+
+                if (data.pesan) document.getElementById('dialogBox').innerHTML = `<b>Dialog:</b> ${data.pesan.teks}`;
+                
+                if (data.user) {
+                    markerUser.setLatLng([data.user.lat, data.user.lng]);
+                    // Auto zoom
+                    const group = new L.featureGroup([markerKurir, markerUser]);
+                    if(markerKurir.getLatLng().lat !== 0) map.fitBounds(group.getBounds().pad(0.3));
+                }
+            });
+
             if (navigator.geolocation) {
-                document.getElementById('status').innerHTML = "Status: <b style='color:green'>Online (Melacak...)</b>";
-
-                // Mengambil lokasi GPS setiap ada pergerakan
-                navigator.geolocation.watchPosition((position) => {
-                    const lat = position.coords.latitude;
-                    const lng = position.coords.longitude;
-
-                    // Update data ke Firebase
-                    db.ref('tracking/transaksi_1').set({
-                        lat: lat,
-                        lng: lng,
-                        waktu: new Date().toLocaleTimeString()
-                    });
-
-                    console.log("Lokasi terupdate:", lat, lng);
-                }, (error) => {
-                    alert("Error GPS: " + error.message);
+                navigator.geolocation.watchPosition(pos => {
+                    const lat = pos.coords.latitude; const lng = pos.coords.longitude;
+                    markerKurir.setLatLng([lat, lng]);
+                    db.ref('tracking/transaksi_1/kurir').set({ lat, lng });
+                }, err => {
+                    alert("Gagal akses lokasi! Pastikan GPS HP aktif dan gunakan HTTPS GitHub.");
                 }, { enableHighAccuracy: true });
-            } else {
-                alert("Browser tidak mendukung GPS.");
             }
         }
+
+        function konfirmasiAntar() {
+            db.ref('tracking/transaksi_1').update({
+                status: 'on_way',
+                pesan: { teks: "Tunggu yah, kurir sedang meluncur!" }
+            });
+            document.getElementById('btnKonfirmasi').style.display = "none";
+        }
+        initMap();
     </script>
 </body>
 </html>
