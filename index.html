@@ -3,21 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Panel Kurir - Kurir (Biru)</title>
+    <title>Panel Kurir - Siapa Cepat</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        body { margin: 0; font-family: sans-serif; background: #f4f4f4; }
-        #map { width: 100%; height: 60vh; }
-        .panel { padding: 20px; text-align: center; background: white; border-radius: 25px 25px 0 0; margin-top: -25px; position: relative; z-index: 1000; box-shadow: 0 -5px 15px rgba(0,0,0,0.1); }
-        #btnKonfirmasi { display: none; background: #28a745; color: white; border: none; padding: 15px; border-radius: 10px; width: 100%; font-weight: bold; cursor: pointer; font-size: 16px; }
-        #dialogBox { background: #f8f9fa; padding: 12px; margin-bottom: 12px; border-radius: 10px; font-size: 14px; border-left: 5px solid #28a745; }
+        body { margin: 0; font-family: sans-serif; }
+        #map { width: 100%; height: 50vh; }
+        .panel { padding: 20px; }
+        .order-card { background: #fff3cd; padding: 15px; border-radius: 10px; border: 1px solid #ffeeba; display: none; }
+        .btn-ambil { background: #007bff; color: white; border: none; padding: 12px; width: 100%; border-radius: 8px; font-weight: bold; margin-top: 10px; }
     </style>
 </head>
 <body>
     <div id="map"></div>
     <div class="panel">
-        <div id="dialogBox"><b>Status:</b> Mencari lokasi GPS...</div>
-        <button id="btnKonfirmasi" onclick="konfirmasiAntar()">Konfirmasi Antar Sekarang</button>
+        <div id="statusGPS">GPS Menghubungkan...</div>
+        <div class="order-card" id="orderNotif">
+            <div id="orderText">Ada pesanan jastip baru!</div>
+            <button class="btn-ambil" onclick="ambilPesanan()">AMBIL PESANAN (REBUTAN)</button>
+        </div>
     </div>
 
     <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js"></script>
@@ -25,75 +28,65 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <script>
-        const firebaseConfig = {
-            apiKey: "AIzaSyCSwZqJAUvacT-oMJCtgp9tfCfCqxOM9CU",
-            authDomain: "jastiptrackingbima.firebaseapp.com",
-            databaseURL: "https://jastiptrackingbima-default-rtdb.asia-southeast1.firebasedatabase.app/",
-            projectId: "jastiptrackingbima",
-            storageBucket: "jastiptrackingbima.firebasestorage.app",
-            messagingSenderId: "187742172528",
-            appId: "1:187742172528:web:0556ec9c738476faff0bb5"
-        };
+        const firebaseConfig = { /* Masukkan Config Firebase Bima */ };
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
+        const kurirId = "kurir_" + Math.floor(Math.random() * 1000); // ID Unik kurir
 
         let map, markerKurir, markerUser;
-        let firstZoom = true; // Penanda untuk zoom pertama kali
-        const blueIcon = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png', iconSize: [25, 41], iconAnchor: [12, 41] });
-        const greenIcon = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png', iconSize: [25, 41], iconAnchor: [12, 41] });
+        const blueIcon = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png', iconSize: [25, 41] });
+        const greenIcon = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png', iconSize: [25, 41] });
 
-        function initMap() {
-            map = L.map('map').setView([0, 0], 2);
+        function init() {
+            map = L.map('map').setView([0,0], 13);
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
             markerKurir = L.marker([0,0], {icon: blueIcon}).addTo(map);
             markerUser = L.marker([0,0], {icon: greenIcon}).addTo(map);
 
-            db.ref('tracking/transaksi_1').on('value', snap => {
-                const data = snap.val();
-                if (!data) {
-                    document.getElementById('dialogBox').innerHTML = "<b>Status:</b> Online & Standby.";
-                    document.getElementById('btnKonfirmasi').style.display = "none";
-                    return;
-                }
-                if (data.status === 'dipilih') {
-                    document.getElementById('dialogBox').innerHTML = "<b>User memilih Anda!</b> Konfirmasi sekarang.";
-                    document.getElementById('btnKonfirmasi').style.display = "block";
-                }
-                if (data.pesan) document.getElementById('dialogBox').innerHTML = `<b>Dialog:</b> ${data.pesan.teks}`;
-                if (data.user) {
-                    markerUser.setLatLng([data.user.lat, data.user.lng]);
-                    // Jika pesanan aktif, zoom ke keduanya
-                    const group = new L.featureGroup([markerKurir, markerUser]);
-                    if(markerKurir.getLatLng().lat !== 0) map.fitBounds(group.getBounds().pad(0.3));
-                }
+            // Update Lokasi Online (Standby)
+            navigator.geolocation.watchPosition(pos => {
+                const lat = pos.coords.latitude, lng = pos.coords.longitude;
+                markerKurir.setLatLng([lat, lng]);
+                map.setView([lat, lng], 15);
+                db.ref('kurir_online/' + kurirId).set({ lat, lng });
+                document.getElementById('statusGPS').innerHTML = "Status: <b>Online & Standby</b>";
             });
 
-            if (navigator.geolocation) {
-                navigator.geolocation.watchPosition(pos => {
-                    const lat = pos.coords.latitude; const lng = pos.coords.longitude;
-                    markerKurir.setLatLng([lat, lng]);
-                    db.ref('tracking/transaksi_1/kurir').set({ lat, lng });
-                    
-                    // Zoom ke icon kurir saat pertama kali standby
-                    if (firstZoom) {
-                        map.setView([lat, lng], 16);
-                        firstZoom = false;
-                        document.getElementById('dialogBox').innerHTML = "<b>Status:</b> Lokasi kurir aktif.";
-                    }
-                }, err => {
-                    alert("GPS Error! Gunakan HTTPS GitHub Pages.");
-                }, { enableHighAccuracy: true });
-            }
+            // Pantau Rebutan Pesanan
+            db.ref('pesanan/aktif').on('value', snap => {
+                const order = snap.val();
+                if(order && order.status === 'mencari') {
+                    document.getElementById('orderNotif').style.display = "block";
+                    document.getElementById('orderText').innerHTML = "Pesanan dari: <b>" + order.toko + "</b>";
+                } else if (order && order.status === 'diambil' && order.kurirId === kurirId) {
+                    // Jika kurir ini yang menang rebutan
+                    document.getElementById('orderNotif').style.display = "none";
+                    document.getElementById('statusGPS').innerHTML = "<b>Pesanan Sedang Diantar!</b>";
+                    markerUser.setLatLng([order.userLat, order.userLng]); // Posisi user baru terlihat sekarang
+                    map.fitBounds(new L.featureGroup([markerKurir, markerUser]).getBounds());
+                } else {
+                    document.getElementById('orderNotif').style.display = "none";
+                    markerUser.setLatLng([0,0]); // Sembunyikan user jika standby
+                }
+            });
         }
 
-        function konfirmasiAntar() {
-            db.ref('tracking/transaksi_1').update({
-                status: 'on_way',
-                pesan: { teks: "Tunggu yah, kurir sedang meluncur!" }
+        function ambilPesanan() {
+            // Logika Siapa Cepat Dia Dapat menggunakan transaction agar tidak bentrok
+            db.ref('pesanan/aktif').transaction((currentData) => {
+                if (currentData && currentData.status === 'mencari') {
+                    currentData.status = 'diambil';
+                    currentData.kurirId = kurirId;
+                    currentData.kurirName = "Kurir Bima";
+                    return currentData;
+                }
+                return; // Batalkan jika sudah diambil orang lain
+            }, (error, committed) => {
+                if (committed) alert("Anda berhasil mengambil pesanan!");
+                else alert("Maaf, pesanan sudah diambil kurir lain.");
             });
-            document.getElementById('btnKonfirmasi').style.display = "none";
         }
-        initMap();
+        init();
     </script>
 </body>
 </html>
