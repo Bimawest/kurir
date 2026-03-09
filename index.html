@@ -5,31 +5,33 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Jastip Bima - Kurir</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.css" />
     <style>
         body { margin: 0; font-family: sans-serif; background: #f4f4f4; }
         #map { width: 100%; height: 50vh; background: #ddd; }
         .panel { padding: 20px; text-align: center; }
         .order-card { background: #fff3cd; padding: 20px; border-radius: 15px; border: 2px solid #ffeeba; display: none; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        .btn-ambil { background: #007bff; color: white; border: none; padding: 15px; width: 100%; border-radius: 10px; font-weight: bold; font-size: 16px; margin-top: 15px; cursor: pointer; }
-        #statusGPS { margin-bottom: 10px; font-weight: bold; color: #555; }
+        .btn-ambil { background: #007bff; color: white; border: none; padding: 15px; width: 100%; border-radius: 10px; font-weight: bold; font-size: 16px; cursor: pointer; }
+        #infoRute { background: white; padding: 10px; border-radius: 8px; margin-bottom: 10px; display: none; font-weight: bold; border: 1px solid #007bff; }
     </style>
 </head>
 <body>
     <div id="map"></div>
     <div class="panel">
-        <div id="statusGPS">Mencari lokasi Anda...</div>
+        <div id="infoRute"></div>
+        <div id="statusGPS" style="margin-bottom:10px;">Mencari lokasi...</div>
         <div class="order-card" id="orderNotif">
-            <div id="orderText" style="font-size: 18px;"></div>
-            <button class="btn-ambil" onclick="ambilPesanan()">AMBIL PESANAN SEKARANG!</button>
+            <div id="orderText" style="font-size: 18px; margin-bottom: 10px;"></div>
+            <button class="btn-ambil" onclick="ambilPesanan()">AMBIL PESANAN</button>
         </div>
     </div>
 
     <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-database-compat.js"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.js"></script>
 
     <script>
-        // KREDENSIAL LENGKAP BIMA
         const firebaseConfig = {
             apiKey: "AIzaSyCSwZqJAUvacT-oMJCtgp9tfCfCqxOM9CU",
             authDomain: "jastiptrackingbima.firebaseapp.com",
@@ -42,74 +44,71 @@
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
 
-        // Mencegah duplikat kurir (localStorage)
-        let kurirId = localStorage.getItem('kurir_id_bima');
-        if (!kurirId) {
-            kurirId = "kurir_" + Math.floor(Math.random() * 9999);
-            localStorage.setItem('kurir_id_bima', kurirId);
-        }
+        let kurirId = localStorage.getItem('kurir_id_bima') || "kurir_" + Math.floor(Math.random() * 9999);
+        localStorage.setItem('kurir_id_bima', kurirId);
 
-        let map, markerKurir, markerUser;
-        let firstLock = false;
-        const blueIcon = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png', iconSize: [25, 41], iconAnchor: [12, 41] });
-        const greenIcon = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png', iconSize: [25, 41], iconAnchor: [12, 41] });
+        let map, markerKurir, routingControl, firstLock = false;
 
         function init() {
-            map = L.map('map').setView([0, 0], 2); 
+            map = L.map('map').setView([0,0], 2);
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-            markerKurir = L.marker([0, 0], {icon: blueIcon}).addTo(map);
-            markerUser = L.marker([0, 0], {icon: greenIcon}).addTo(map);
+            markerKurir = L.marker([0,0]).addTo(map);
 
             if (navigator.geolocation) {
                 navigator.geolocation.watchPosition(pos => {
                     const lat = pos.coords.latitude, lng = pos.coords.longitude;
                     markerKurir.setLatLng([lat, lng]);
                     
-                    // --- LOGIKA PENGHAPUSAN OTOMATIS (Presence) ---
+                    // Logika Presence (Auto-Delete)
                     const onlineRef = db.ref('kurir_online/' + kurirId);
-                    
-                    // 1. Simpan koordinat saat online
                     onlineRef.set({ lat, lng });
-                    
-                    // 2. Perintah ke server: "Jika saya mati/tutup web, hapus data saya!"
                     onlineRef.onDisconnect().remove(); 
                     
-                    document.getElementById('statusGPS').innerHTML = "Status: <b>Online & Standby</b>";
-                    
-                    if (!firstLock) {
-                        map.setView([lat, lng], 17);
-                        firstLock = true;
-                    }
+                    document.getElementById('statusGPS').innerHTML = "Status: <b>Online</b>";
+                    if (!firstLock) { map.setView([lat, lng], 16); firstLock = true; }
                 }, null, { enableHighAccuracy: true });
             }
 
-            // Fallback tambahan untuk penutupan tab secara normal
-            window.addEventListener('beforeunload', () => {
-                db.ref('kurir_online/' + kurirId).remove();
-            });
-
-            // Mendengarkan pesanan masuk
             db.ref('pesanan/aktif').on('value', snap => {
                 const order = snap.val();
+                const notif = document.getElementById('orderNotif');
+                const info = document.getElementById('infoRute');
+
                 if(order && order.status === 'mencari') {
-                    document.getElementById('orderNotif').style.display = "block";
-                    document.getElementById('orderText').innerHTML = "📦 Ada Jastip di: <b>" + order.toko + "</b>";
+                    notif.style.display = "block";
+                    document.getElementById('orderText').innerHTML = "📦 Jastip di: " + order.toko;
                 } else if (order && order.status === 'diambil' && order.kurirId === kurirId) {
-                    document.getElementById('orderNotif').style.display = "none";
-                    markerUser.setLatLng([order.userLat, order.userLng]);
-                    map.fitBounds(new L.featureGroup([markerKurir, markerUser]).getBounds().pad(0.3));
+                    notif.style.display = "none";
+                    updateRute(order.userLat, order.userLng);
                 } else {
-                    document.getElementById('orderNotif').style.display = "none";
+                    notif.style.display = "none";
+                    info.style.display = "none";
+                    if(routingControl) map.removeControl(routingControl);
                 }
             });
         }
 
+        function updateRute(uLat, uLng) {
+            if (routingControl) map.removeControl(routingControl);
+            const kPos = markerKurir.getLatLng();
+            
+            routingControl = L.Routing.control({
+                waypoints: [L.latLng(kPos.lat, kPos.lng), L.latLng(uLat, uLng)],
+                lineOptions: { styles: [{ color: 'blue', weight: 6 }] },
+                createMarker: function() { return null; } 
+            }).on('routesfound', function(e) {
+                const r = e.routes[0];
+                const estimasi = `${(r.summary.totalDistance/1000).toFixed(1)} km (${Math.round(r.summary.totalTime/60)} menit)`;
+                document.getElementById('infoRute').style.display = "block";
+                document.getElementById('infoRute').innerHTML = "Rute ke User: " + estimasi;
+                db.ref('pesanan/aktif/estimasi').set(estimasi);
+            }).addTo(map);
+        }
+
         function ambilPesanan() {
-            db.ref('pesanan/aktif').transaction((cur) => {
+            db.ref('pesanan/aktif').transaction(cur => {
                 if (cur && cur.status === 'mencari') {
-                    cur.status = 'diambil';
-                    cur.kurirId = kurirId;
-                    return cur;
+                    cur.status = 'diambil'; cur.kurirId = kurirId; return cur;
                 }
             });
         }
