@@ -13,13 +13,14 @@
         .order-card { background: #fff3cd; padding: 20px; border-radius: 15px; border: 2px solid #ffeeba; display: none; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
         .btn-ambil { background: #007bff; color: white; border: none; padding: 15px; width: 100%; border-radius: 10px; font-weight: bold; cursor: pointer; }
         #infoRute { background: white; padding: 10px; border-radius: 8px; margin-bottom: 10px; display: none; font-weight: bold; border: 1px solid #007bff; color: #007bff; }
+        #statusGPS { margin-bottom: 10px; font-size: 14px; color: #666; }
     </style>
 </head>
 <body>
     <div id="map"></div>
     <div class="panel">
         <div id="infoRute"></div>
-        <div id="statusGPS" style="margin-bottom:10px; font-weight:bold;">Mencari lokasi...</div>
+        <div id="statusGPS">Mencari lokasi GPS...</div>
         <div class="order-card" id="orderNotif">
             <div id="orderText" style="font-size: 18px; margin-bottom: 10px;"></div>
             <button class="btn-ambil" onclick="ambilPesanan()">AMBIL PESANAN SEKARANG</button>
@@ -32,6 +33,7 @@
     <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.js"></script>
 
     <script>
+        // KONFIGURASI FIREBASE ASLI BIMA
         const firebaseConfig = {
             apiKey: "AIzaSyCSwZqJAUvacT-oMJCtgp9tfCfCqxOM9CU",
             authDomain: "jastiptrackingbima.firebaseapp.com",
@@ -53,22 +55,24 @@
         const greenIcon = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png', iconSize: [25, 41], iconAnchor: [12, 41] });
 
         function init() {
-            map = L.map('map').setView([0,0], 2);
+            // PERBAIKAN: Set pandangan awal ke Indonesia agar tidak di laut Afrika
+            map = L.map('map').setView([-0.4781, 117.1518], 13); 
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
             
-            markerKurir = L.marker([0,0], {icon: blueIcon}).addTo(map);
-            markerUser = L.marker([0,0], {icon: greenIcon}); // Siapkan marker tanpa addTo(map)
+            markerKurir = L.marker([0,0], {icon: blueIcon}).addTo(map); // Ikon Kurir Biru
+            markerUser = L.marker([0,0], {icon: greenIcon}); // Siapkan Ikon User Hijau
 
             if (navigator.geolocation) {
                 navigator.geolocation.watchPosition(pos => {
                     const lat = pos.coords.latitude, lng = pos.coords.longitude;
-                    markerKurir.setLatLng([lat, lng]);
+                    markerKurir.setLatLng([lat, lng]); // Lokasi asli Anda
                     
+                    // Auto-Delete saat web ditutup atau offline
                     const onlineRef = db.ref('kurir_online/' + kurirId);
                     onlineRef.set({ lat, lng });
                     onlineRef.onDisconnect().remove(); 
                     
-                    document.getElementById('statusGPS').innerHTML = "Status: <span style='color:green;'>Online & Standby</span>";
+                    document.getElementById('statusGPS').innerHTML = "Status: <span style='color:green;'>Online & GPS Aktif</span>";
                     if (!firstLock) { map.setView([lat, lng], 17); firstLock = true; }
                 }, null, { enableHighAccuracy: true });
             }
@@ -78,14 +82,57 @@
                 const notif = document.getElementById('orderNotif');
                 const info = document.getElementById('infoRute');
 
-                // LOGIKA PEMBERSIHAN SAAT STANDBY ATAU PESANAN BARU
-                if(!order || order.status === 'mencari' || (order.status === 'diambil' && order.kurirId !== kurirId)) {
-                    // Sembunyikan rute dan ikon user
-                    if(routingControl) map.removeControl(routingControl);
-                    if(map.hasLayer(markerUser)) map.removeLayer(markerUser);
+                // LOGIKA PEMBERSIHAN (Setelah paket diterima, dibatalkan, atau standby)
+                if(!order || order.status === 'mencari') {
+                    if(routingControl) map.removeControl(routingControl); // Hapus Jalur Biru
+                    if(map.hasLayer(markerUser)) map.removeLayer(markerUser); // Hapus Ikon User Hijau
                     info.style.display = "none";
 
-                    // Jika ada pesanan baru masuk (status mencari)
                     if(order && order.status === 'mencari') {
                         notif.style.display = "block";
-                        document.getElementById('orderText').innerHTML = "📦 Ada Jastip di: <b>" +
+                        document.getElementById('orderText').innerHTML = "📦 Ada Jastip di: <b>" + order.toko + "</b>";
+                    } else {
+                        notif.style.display = "none";
+                    }
+                } 
+                // LOGIKA PENGANTARAN (Saat pesanan diambil)
+                else if (order && order.status === 'diambil' && order.kurirId === kurirId) {
+                    notif.style.display = "none";
+                    info.style.display = "block";
+                    
+                    // Munculkan Ikon User Hijau saat pengantaran
+                    markerUser.setLatLng([order.userLat, order.userLng]).addTo(map).bindPopup("Lokasi Pembeli");
+                    
+                    updateRute(order.userLat, order.userLng);
+                }
+            });
+        }
+
+        function updateRute(uLat, uLng) {
+            if (routingControl) map.removeControl(routingControl);
+            const kPos = markerKurir.getLatLng();
+            
+            // Membuat Jalur Rute Garis Biru & Estimasi
+            routingControl = L.Routing.control({
+                waypoints: [L.latLng(kPos.lat, kPos.lng), L.latLng(uLat, uLng)],
+                lineOptions: { styles: [{ color: 'blue', weight: 6 }] },
+                createMarker: function() { return null; } 
+            }).on('routesfound', function(e) {
+                const r = e.routes[0];
+                const estimasi = `${(r.summary.totalDistance/1000).toFixed(1)} km (${Math.round(r.summary.totalTime/60)} menit)`;
+                document.getElementById('infoRute').innerHTML = "📍 Estimasi ke User: " + estimasi;
+                db.ref('pesanan/aktif/estimasi').set(estimasi);
+            }).addTo(map);
+        }
+
+        function ambilPesanan() {
+            db.ref('pesanan/aktif').transaction(cur => {
+                if (cur && cur.status === 'mencari') {
+                    cur.status = 'diambil'; cur.kurirId = kurirId; return cur;
+                }
+            });
+        }
+        init();
+    </script>
+</body>
+</html>
