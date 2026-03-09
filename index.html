@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         body { margin: 0; font-family: sans-serif; background: #f4f4f4; }
-        #map { width: 100%; height: 50vh; background: #e0e0e0; }
+        #map { width: 100%; height: 50vh; background: #ddd; }
         .panel { padding: 20px; text-align: center; }
         .order-card { background: #fff3cd; padding: 20px; border-radius: 15px; border: 2px solid #ffeeba; display: none; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
         .btn-ambil { background: #007bff; color: white; border: none; padding: 15px; width: 100%; border-radius: 10px; font-weight: bold; font-size: 16px; margin-top: 15px; cursor: pointer; }
@@ -29,7 +29,6 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <script>
-        // KREDENSIAL TETAP AMAN
         const firebaseConfig = {
             apiKey: "AIzaSyCSwZqJAUvacT-oMJCtgp9tfCfCqxOM9CU",
             authDomain: "jastiptrackingbima.firebaseapp.com",
@@ -41,19 +40,22 @@
         };
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
-        const kurirId = "kurir_" + Math.floor(Math.random() * 9999);
+
+        // Mencegah duplikat kurir saat refresh
+        let kurirId = localStorage.getItem('kurir_id_bima');
+        if (!kurirId) {
+            kurirId = "kurir_" + Math.floor(Math.random() * 9999);
+            localStorage.setItem('kurir_id_bima', kurirId);
+        }
 
         let map, markerKurir, markerUser;
-        let firstLock = false; // Pengunci agar tidak auto-zoom berulang kali
-
+        let firstLock = false;
         const blueIcon = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png', iconSize: [25, 41], iconAnchor: [12, 41] });
         const greenIcon = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png', iconSize: [25, 41], iconAnchor: [12, 41] });
 
         function init() {
-            // Mulai peta di titik nol, nanti akan terbang ke lokasi Anda
             map = L.map('map').setView([0, 0], 2); 
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-            
             markerKurir = L.marker([0, 0], {icon: blueIcon}).addTo(map);
             markerUser = L.marker([0, 0], {icon: greenIcon}).addTo(map);
 
@@ -62,21 +64,23 @@
                     const lat = pos.coords.latitude, lng = pos.coords.longitude;
                     markerKurir.setLatLng([lat, lng]);
                     
-                    // Update database online
+                    // Update database
                     db.ref('kurir_online/' + kurirId).set({ lat, lng });
                     document.getElementById('statusGPS').innerHTML = "Status: <b>Online & Standby</b>";
                     
-                    // FOKUS KE LOKASI ANDA SAAT STANDBY
+                    // Fokus ke lokasi asli Anda saat pertama kali load
                     if (!firstLock) {
-                        map.setView([lat, lng], 17); // Zoom ke titik biru Anda
+                        map.setView([lat, lng], 17);
                         firstLock = true;
                     }
-                }, err => {
-                    document.getElementById('statusGPS').innerHTML = "GPS Error! Izinkan lokasi di browser.";
-                }, { enableHighAccuracy: true });
+                }, null, { enableHighAccuracy: true });
             }
 
-            // Cek Rebutan Pesanan
+            // Hapus ikon saat tab ditutup
+            window.addEventListener('beforeunload', () => {
+                db.ref('kurir_online/' + kurirId).remove();
+            });
+
             db.ref('pesanan/aktif').on('value', snap => {
                 const order = snap.val();
                 if(order && order.status === 'mencari') {
@@ -84,13 +88,10 @@
                     document.getElementById('orderText').innerHTML = "📦 Ada Jastip di: <b>" + order.toko + "</b>";
                 } else if (order && order.status === 'diambil' && order.kurirId === kurirId) {
                     document.getElementById('orderNotif').style.display = "none";
-                    document.getElementById('statusGPS').innerHTML = "🚀 <b>Menuju Lokasi User</b>";
                     markerUser.setLatLng([order.userLat, order.userLng]);
-                    // Zoom ke kurir dan user sekaligus
                     map.fitBounds(new L.featureGroup([markerKurir, markerUser]).getBounds().pad(0.3));
                 } else {
                     document.getElementById('orderNotif').style.display = "none";
-                    markerUser.setLatLng([0, 0]); 
                 }
             });
         }
@@ -100,13 +101,8 @@
                 if (cur && cur.status === 'mencari') {
                     cur.status = 'diambil';
                     cur.kurirId = kurirId;
-                    cur.kurirName = "Bima Courier";
                     return cur;
                 }
-                return;
-            }, (err, commit) => {
-                if (commit) alert("Berhasil! Ikuti rute ke User.");
-                else alert("Maaf, pesanan sudah diambil rekan lain.");
             });
         }
         init();
