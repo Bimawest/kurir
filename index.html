@@ -11,18 +11,18 @@
         #map { width: 100%; height: 50vh; background: #ddd; }
         .panel { padding: 20px; text-align: center; }
         .order-card { background: #fff3cd; padding: 20px; border-radius: 15px; border: 2px solid #ffeeba; display: none; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        .btn-ambil { background: #007bff; color: white; border: none; padding: 15px; width: 100%; border-radius: 10px; font-weight: bold; font-size: 16px; cursor: pointer; }
-        #infoRute { background: white; padding: 10px; border-radius: 8px; margin-bottom: 10px; display: none; font-weight: bold; border: 1px solid #007bff; }
+        .btn-ambil { background: #007bff; color: white; border: none; padding: 15px; width: 100%; border-radius: 10px; font-weight: bold; cursor: pointer; }
+        #infoRute { background: white; padding: 10px; border-radius: 8px; margin-bottom: 10px; display: none; font-weight: bold; border: 1px solid #007bff; color: #007bff; }
     </style>
 </head>
 <body>
     <div id="map"></div>
     <div class="panel">
         <div id="infoRute"></div>
-        <div id="statusGPS" style="margin-bottom:10px;">Mencari lokasi...</div>
+        <div id="statusGPS" style="margin-bottom:10px; font-weight:bold;">Mencari lokasi...</div>
         <div class="order-card" id="orderNotif">
             <div id="orderText" style="font-size: 18px; margin-bottom: 10px;"></div>
-            <button class="btn-ambil" onclick="ambilPesanan()">AMBIL PESANAN</button>
+            <button class="btn-ambil" onclick="ambilPesanan()">AMBIL PESANAN SEKARANG</button>
         </div>
     </div>
 
@@ -47,25 +47,29 @@
         let kurirId = localStorage.getItem('kurir_id_bima') || "kurir_" + Math.floor(Math.random() * 9999);
         localStorage.setItem('kurir_id_bima', kurirId);
 
-        let map, markerKurir, routingControl, firstLock = false;
+        let map, markerKurir, markerUser, routingControl, firstLock = false;
+
+        const blueIcon = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png', iconSize: [25, 41], iconAnchor: [12, 41] });
+        const greenIcon = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png', iconSize: [25, 41], iconAnchor: [12, 41] });
 
         function init() {
             map = L.map('map').setView([0,0], 2);
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-            markerKurir = L.marker([0,0]).addTo(map);
+            
+            markerKurir = L.marker([0,0], {icon: blueIcon}).addTo(map);
+            markerUser = L.marker([0,0], {icon: greenIcon}); // Siapkan marker tanpa addTo(map)
 
             if (navigator.geolocation) {
                 navigator.geolocation.watchPosition(pos => {
                     const lat = pos.coords.latitude, lng = pos.coords.longitude;
                     markerKurir.setLatLng([lat, lng]);
                     
-                    // Logika Presence (Auto-Delete)
                     const onlineRef = db.ref('kurir_online/' + kurirId);
                     onlineRef.set({ lat, lng });
                     onlineRef.onDisconnect().remove(); 
                     
-                    document.getElementById('statusGPS').innerHTML = "Status: <b>Online</b>";
-                    if (!firstLock) { map.setView([lat, lng], 16); firstLock = true; }
+                    document.getElementById('statusGPS').innerHTML = "Status: <span style='color:green;'>Online & Standby</span>";
+                    if (!firstLock) { map.setView([lat, lng], 17); firstLock = true; }
                 }, null, { enableHighAccuracy: true });
             }
 
@@ -74,45 +78,14 @@
                 const notif = document.getElementById('orderNotif');
                 const info = document.getElementById('infoRute');
 
-                if(order && order.status === 'mencari') {
-                    notif.style.display = "block";
-                    document.getElementById('orderText').innerHTML = "📦 Jastip di: " + order.toko;
-                } else if (order && order.status === 'diambil' && order.kurirId === kurirId) {
-                    notif.style.display = "none";
-                    updateRute(order.userLat, order.userLng);
-                } else {
-                    notif.style.display = "none";
-                    info.style.display = "none";
+                // LOGIKA PEMBERSIHAN SAAT STANDBY ATAU PESANAN BARU
+                if(!order || order.status === 'mencari' || (order.status === 'diambil' && order.kurirId !== kurirId)) {
+                    // Sembunyikan rute dan ikon user
                     if(routingControl) map.removeControl(routingControl);
-                }
-            });
-        }
+                    if(map.hasLayer(markerUser)) map.removeLayer(markerUser);
+                    info.style.display = "none";
 
-        function updateRute(uLat, uLng) {
-            if (routingControl) map.removeControl(routingControl);
-            const kPos = markerKurir.getLatLng();
-            
-            routingControl = L.Routing.control({
-                waypoints: [L.latLng(kPos.lat, kPos.lng), L.latLng(uLat, uLng)],
-                lineOptions: { styles: [{ color: 'blue', weight: 6 }] },
-                createMarker: function() { return null; } 
-            }).on('routesfound', function(e) {
-                const r = e.routes[0];
-                const estimasi = `${(r.summary.totalDistance/1000).toFixed(1)} km (${Math.round(r.summary.totalTime/60)} menit)`;
-                document.getElementById('infoRute').style.display = "block";
-                document.getElementById('infoRute').innerHTML = "Rute ke User: " + estimasi;
-                db.ref('pesanan/aktif/estimasi').set(estimasi);
-            }).addTo(map);
-        }
-
-        function ambilPesanan() {
-            db.ref('pesanan/aktif').transaction(cur => {
-                if (cur && cur.status === 'mencari') {
-                    cur.status = 'diambil'; cur.kurirId = kurirId; return cur;
-                }
-            });
-        }
-        init();
-    </script>
-</body>
-</html>
+                    // Jika ada pesanan baru masuk (status mencari)
+                    if(order && order.status === 'mencari') {
+                        notif.style.display = "block";
+                        document.getElementById('orderText').innerHTML = "📦 Ada Jastip di: <b>" +
