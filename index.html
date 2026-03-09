@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jastip - Panel Kurir</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding: 20px; background: #f0f2f5; }
+        .card { background: white; padding: 30px; border-radius: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 400px; margin: auto; }
+        button { background: #0084ff; color: white; border: none; padding: 15px 25px; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold; }
+        #status { margin-top: 20px; color: #555; }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h2>Panel Kurir Jastip</h2>
+        <p>Tekan tombol untuk mulai membagikan lokasi Anda secara live.</p>
+        <button onclick="aktifkanGPS()">Mulai Antar Barang</button>
+        <p id="status">Status: <b>Offline</b></p>
+    </div>
+
+    <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-database-compat.js"></script>
+
+    <script>
+        // Konfigurasi Firebase Anda
+        const firebaseConfig = {
+            apiKey: "AIzaSyCSwZqJAUvacT-oMJCtgp9tfCfCqxOM9CU",
+            authDomain: "jastiptrackingbima.firebaseapp.com",
+            databaseURL: "https://jastiptrackingbima-default-rtdb.asia-southeast1.firebasedatabase.app/",
+            projectId: "jastiptrackingbima",
+            storageBucket: "jastiptrackingbima.firebasestorage.app",
+            messagingSenderId: "187742172528",
+            appId: "1:187742172528:web:0556ec9c738476faff0bb5"
+        };
+        
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+
+        function aktifkanGPS() {
+            if (navigator.geolocation) {
+                document.getElementById('status').innerHTML = "Status: <b style='color:green'>Online (Melacak...)</b>";
+
+                // Mengambil lokasi GPS setiap ada pergerakan
+                navigator.geolocation.watchPosition((position) => {
+                    const lat = position.coords.latitude;
+                    const lng = position.coords.longitude;
+
+                    // Update data ke Firebase
+                    db.ref('tracking/transaksi_1').set({
+                        lat: lat,
+                        lng: lng,
+                        waktu: new Date().toLocaleTimeString()
+                    });
+
+                    console.log("Lokasi terupdate:", lat, lng);
+                }, (error) => {
+                    alert("Error GPS: " + error.message);
+                }, { enableHighAccuracy: true });
+            } else {
+                alert("Browser tidak mendukung GPS.");
+            }
+        }
+    </script>
+</body>
+</html>
