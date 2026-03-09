@@ -3,23 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Panel Kurir - Siapa Cepat</title>
+    <title>Jastip Bima - Kurir</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        body { margin: 0; font-family: sans-serif; }
+        body { margin: 0; font-family: sans-serif; background: #f4f4f4; }
         #map { width: 100%; height: 50vh; }
-        .panel { padding: 20px; }
-        .order-card { background: #fff3cd; padding: 15px; border-radius: 10px; border: 1px solid #ffeeba; display: none; }
-        .btn-ambil { background: #007bff; color: white; border: none; padding: 12px; width: 100%; border-radius: 8px; font-weight: bold; margin-top: 10px; }
+        .panel { padding: 20px; text-align: center; }
+        .order-card { background: #fff3cd; padding: 20px; border-radius: 15px; border: 2px solid #ffeeba; display: none; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        .btn-ambil { background: #007bff; color: white; border: none; padding: 15px; width: 100%; border-radius: 10px; font-weight: bold; font-size: 16px; margin-top: 15px; cursor: pointer; }
+        #statusGPS { margin-bottom: 10px; font-weight: bold; color: #555; }
     </style>
 </head>
 <body>
     <div id="map"></div>
     <div class="panel">
-        <div id="statusGPS">GPS Menghubungkan...</div>
+        <div id="statusGPS">Menghubungkan GPS...</div>
         <div class="order-card" id="orderNotif">
-            <div id="orderText">Ada pesanan jastip baru!</div>
-            <button class="btn-ambil" onclick="ambilPesanan()">AMBIL PESANAN (REBUTAN)</button>
+            <div id="orderText" style="font-size: 18px;"></div>
+            <button class="btn-ambil" onclick="ambilPesanan()">AMBIL PESANAN SEKARANG!</button>
         </div>
     </div>
 
@@ -28,14 +29,22 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <script>
-        const firebaseConfig = { /* Masukkan Config Firebase Bima */ };
+        const firebaseConfig = {
+            apiKey: "AIzaSyCSwZqJAUvacT-oMJCtgp9tfCfCqxOM9CU",
+            authDomain: "jastiptrackingbima.firebaseapp.com",
+            databaseURL: "https://jastiptrackingbima-default-rtdb.asia-southeast1.firebasedatabase.app/",
+            projectId: "jastiptrackingbima",
+            storageBucket: "jastiptrackingbima.firebasestorage.app",
+            messagingSenderId: "187742172528",
+            appId: "1:187742172528:web:0556ec9c738476faff0bb5"
+        };
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
-        const kurirId = "kurir_" + Math.floor(Math.random() * 1000); // ID Unik kurir
+        const kurirId = "kurir_" + Math.floor(Math.random() * 9999);
 
         let map, markerKurir, markerUser;
-        const blueIcon = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png', iconSize: [25, 41] });
-        const greenIcon = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png', iconSize: [25, 41] });
+        const blueIcon = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png', iconSize: [25, 41], iconAnchor: [12, 41] });
+        const greenIcon = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png', iconSize: [25, 41], iconAnchor: [12, 41] });
 
         function init() {
             map = L.map('map').setView([0,0], 13);
@@ -43,27 +52,23 @@
             markerKurir = L.marker([0,0], {icon: blueIcon}).addTo(map);
             markerUser = L.marker([0,0], {icon: greenIcon}).addTo(map);
 
-            // Update Lokasi Online (Standby)
             navigator.geolocation.watchPosition(pos => {
                 const lat = pos.coords.latitude, lng = pos.coords.longitude;
                 markerKurir.setLatLng([lat, lng]);
-                map.setView([lat, lng], 15);
                 db.ref('kurir_online/' + kurirId).set({ lat, lng });
                 document.getElementById('statusGPS').innerHTML = "Status: <b>Online & Standby</b>";
-            });
+            }, null, { enableHighAccuracy: true });
 
-            // Pantau Rebutan Pesanan
             db.ref('pesanan/aktif').on('value', snap => {
                 const order = snap.val();
                 if(order && order.status === 'mencari') {
                     document.getElementById('orderNotif').style.display = "block";
-                    document.getElementById('orderText').innerHTML = "Pesanan dari: <b>" + order.toko + "</b>";
+                    document.getElementById('orderText').innerHTML = "📦 Ada Jastip di: <b>" + order.toko + "</b>";
                 } else if (order && order.status === 'diambil' && order.kurirId === kurirId) {
-                    // Jika kurir ini yang menang rebutan
                     document.getElementById('orderNotif').style.display = "none";
-                    document.getElementById('statusGPS').innerHTML = "<b>Pesanan Sedang Diantar!</b>";
-                    markerUser.setLatLng([order.userLat, order.userLng]); // Posisi user baru terlihat sekarang
-                    map.fitBounds(new L.featureGroup([markerKurir, markerUser]).getBounds());
+                    document.getElementById('statusGPS').innerHTML = "🚀 <b>Mengantar ke User!</b>";
+                    markerUser.setLatLng([order.userLat, order.userLng]); // User terlihat sekarang
+                    map.fitBounds(new L.featureGroup([markerKurir, markerUser]).getBounds().pad(0.3));
                 } else {
                     document.getElementById('orderNotif').style.display = "none";
                     markerUser.setLatLng([0,0]); // Sembunyikan user jika standby
@@ -72,18 +77,17 @@
         }
 
         function ambilPesanan() {
-            // Logika Siapa Cepat Dia Dapat menggunakan transaction agar tidak bentrok
-            db.ref('pesanan/aktif').transaction((currentData) => {
-                if (currentData && currentData.status === 'mencari') {
-                    currentData.status = 'diambil';
-                    currentData.kurirId = kurirId;
-                    currentData.kurirName = "Kurir Bima";
-                    return currentData;
+            db.ref('pesanan/aktif').transaction((cur) => {
+                if (cur && cur.status === 'mencari') {
+                    cur.status = 'diambil';
+                    cur.kurirId = kurirId;
+                    cur.kurirName = "Bima Courier";
+                    return cur;
                 }
-                return; // Batalkan jika sudah diambil orang lain
-            }, (error, committed) => {
-                if (committed) alert("Anda berhasil mengambil pesanan!");
-                else alert("Maaf, pesanan sudah diambil kurir lain.");
+                return;
+            }, (err, commit) => {
+                if (commit) alert("Selamat! Anda pemenangnya.");
+                else alert("Yah, sudah diambil kurir lain.");
             });
         }
         init();
